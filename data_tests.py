@@ -1,5 +1,5 @@
 import unittest
-from study_parser import *
+from study_parser_parallel import *
 
 class DataTests(unittest.TestCase):
     def setUp(self):
