@@ -3,7 +3,7 @@ import os
 import numpy as np
 import math
 
-# import study_parser_v1 as study_parser        # Use this import to test the first version of study_parser
+import study_parser_v1 as study_parser_v1
 import study_parser_v2_parallel as study_parser
 from full_pipeline_v3 import DataManager, StudyDataset
 
@@ -13,22 +13,26 @@ class DataTests(unittest.TestCase):
         """
         Initialize all the settings needed to run the tests
         """
-        # Init settings
+        # DICOM studies used to test (they could be a more reduced dataset, but using these ones for simplicity)
         self.dicom_files_folder = "final_data/dicoms/SCD0000101"
         self.contour_files_folder = "final_data/contourfiles/SC-HF-I-1/i-contours/"
-        self.num_images_study1 = 240
+        self.num_images_study = 240
         self.dicom_files_folder_2 = "final_data/dicoms/SCD0000201"
         self.contour_files_folder_2 = "final_data/contourfiles/SC-HF-I-2/i-contours/"
         self.num_images_study2 = 260
-        self.img_size = (256, 256)
+        self.img_size = (212, 212)
+        # File name format for the contour files
         self.contour_mask_file_format= "IM-0001-{:04}-icontour-manual.txt"
         self.contour_file_name = os.path.join(self.contour_files_folder, self.contour_mask_file_format.format(48))
+        # Mask file that has been QCd and saved as a numpy for testing purposes (see testCompareWithKnownMask)
         self.previously_saved_mask_file = os.path.join(self.contour_files_folder, "IM-0001-0048-icontour-manual-mask.npy")
-        self.total_images_in_study = 240
+        self.batch_size = 10        # Batch size for the full pipeline tests
+
+
 
     def testReadSingleDicomFile(self):
         """
-        Check the first dicom image in the study
+        Read the first dicom image in the study
         """
         file_name = os.path.join(self.dicom_files_folder, "1.dcm")
         self.assertTrue(os.path.exists(file_name), "File '{}' not found. Please review test data folders".format(file_name))
@@ -80,9 +84,12 @@ class DataTests(unittest.TestCase):
         # Compare masks
         self.assertTrue(np.array_equal(mask1, mask2), "Previously calculated mask does not match with the current results")
 
-    def testLoadFullStudy(self):
+    def testLoadFullStudySingleThread(self):
+        """
+        Iterate over all the images-masks in a study
+        """
         i = 0
-        for im, mask in study_parser.process_study(self.dicom_files_folder, self.contour_files_folder,
+        for im, mask in study_parser_v1.process_study(self.dicom_files_folder, self.contour_files_folder,
                                                    contour_file_mask_format=self.contour_mask_file_format):
             self.assertIsNotNone(im)
             self.assertIsNotNone(mask)
@@ -91,47 +98,62 @@ class DataTests(unittest.TestCase):
             self.assertTrue(im.dtype == np.int16, "Error in image {}".format(i))
             self.assertTrue(mask.dtype == np.bool, "Error in image {}".format(i))
             i += 1
-        self.assertTrue(i == self.total_images_in_study, "Expected a total of {} images, but got {}".
-                        format(self.total_images_in_study, i))
+        self.assertTrue(i == self.num_images_study, "Expected a total of {} images, but got {}".
+                        format(self.num_images_study, i))
 
     def testLoadFullStudyParallel(self):
-        i = 0
-        for im, mask in study_parser.process_study(self.dicom_files_folder, self.contour_files_folder,
-                                                   contour_file_mask_format=self.contour_mask_file_format):
-            self.assertIsNotNone(im)
-            self.assertIsNotNone(mask)
-            self.assertIsInstance(im, np.ndarray, "Error in image {}".format(i))
-            self.assertIsInstance(mask, np.ndarray, "Error in image {}".format(i))
-            self.assertTrue(im.dtype == np.int16, "Error in image {}".format(i))
-            self.assertTrue(mask.dtype == np.bool, "Error in image {}".format(i))
-            i += 1
-        self.assertTrue(i == self.total_images_in_study, "Expected a total of {} images, but got {}".
-                        format(self.total_images_in_study, i))
+        """
+        Iterate over all the images-masks in a study
+        """
+        total_images = 0
+        for results in study_parser.process_study(self.dicom_files_folder, self.contour_files_folder,
+                                                   contour_file_mask_format=self.contour_mask_file_format,
+                                                   num_images=10):
+            self.assertIsNotNone(results)
+            self.assertTrue(len(results) == 10)
+            for j in range(10):
+                if results[j] is None:
+                    # End of data
+                    break
+                im = results[j][0]
+                mask = results[j][1]
+                self.assertIsNotNone(im)
+                self.assertIsNotNone(mask)
+                self.assertIsInstance(im, np.ndarray, "Error in image {}".format(total_images))
+                self.assertIsInstance(mask, np.ndarray, "Error in image {}".format(total_images))
+                self.assertTrue(im.dtype == np.int16, "Error in image {}".format(total_images))
+                self.assertTrue(mask.dtype == np.bool, "Error in image {}".format(total_images))
+                total_images += 1
+
+        self.assertTrue(total_images == self.num_images_study, "Expected a total of {} images, but got {}".
+                        format(self.num_images_study, total_images))
 
     def testFullPipeline(self):
+        """
+        Test the full pipeline.
+        The test uses 2 studies to check the number of epochs and the image indexes is working ok
+        """
         # Use a test dataset here. For demo purposes I am using the first two studies
-        data_manager = DataManager(randomize_images=False)
+        data_manager = DataManager(randomize_images=True)
         study1 = StudyDataset(self.dicom_files_folder, self.contour_files_folder,
                                contour_mask_file_format=self.contour_mask_file_format)
-        self.assertTrue(study1.num_images == self.num_images_study1)
+        self.assertTrue(study1.num_images == self.num_images_study)
         data_manager.add_study(study1)
         study2 = StudyDataset(self.dicom_files_folder_2, self.contour_files_folder_2,
                               contour_mask_file_format=self.contour_mask_file_format)
         self.assertTrue(study2.num_images == self.num_images_study2)
         data_manager.add_study(study2)
 
-        batch_size = 10
-        # Calculate the total number of steps per epoch based on the based size
+        # Calculate the total number of steps per epoch based on the based size and the total number of images in the dataset
         total_num_images = data_manager.total_images
         self.assertTrue(total_num_images == study1.num_images + study2.num_images, "The total number of images does not match")
-
-        steps_per_epoch = int(math.floor(total_num_images / float(batch_size)))
+        steps_per_epoch = int(math.floor(total_num_images / float(self.batch_size)))
 
         num_step = 0
-        for ims, masks in data_manager.get_next_batch(batch_size, self.img_size):
+        for ims, masks in data_manager.get_next_batch(self.batch_size, self.img_size):
             # Size tests
-            self.assertTrue(ims.shape[0] == batch_size)
-            self.assertTrue(masks.shape[0] == batch_size)
+            self.assertTrue(ims.shape[0] == self.batch_size)
+            self.assertTrue(masks.shape[0] == self.batch_size)
             self.assertTrue(ims.shape[1:] == self.img_size)
             self.assertTrue(masks.shape[1:] == self.img_size)
             # Type tests (the batch should be floats in 0-1 range)
@@ -141,6 +163,7 @@ class DataTests(unittest.TestCase):
             self.assertTrue(ims.max() <= 1.0, "Max dataset value: {}. Expected: <= 1.0".format(ims.max()))
             self.assertTrue(masks.min() >= 0.0, "Min dataset value: {}. Expected: 0".format(masks.min()))
             self.assertTrue(masks.max() <= 1.0, "Max dataset value: {}. Expected: <= 1.0".format(masks.max()))
+            # This is the epoch where we should be based on the number of steps taken so far
             expected_epoch = int(num_step / steps_per_epoch)
             self.assertTrue(expected_epoch == data_manager.num_epochs,
                     "Num step: {}. Expected epoch: {}. Real epoch: {}".format(num_step, expected_epoch,

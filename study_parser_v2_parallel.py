@@ -74,6 +74,12 @@ def mask_from_contour_file(file_name, width, height):
     return poly_to_mask(coords, width, height)
 
 def process_dicom_entry(dicom_file, contour_file):
+    """
+    Given a DICOM file and a contour file, return the image as a numpy array and a numpy boolean mask
+    :param dicom_file: path to the DICOM file
+    :param contour_file: path to the DICOM contour file. If the file does not exist, the method returns a blank mask
+    :return: tuple with numpy array image and mask
+    """
     try:
         # Read the dicom file
         dicom_pixel_array = parse_dicom_file(dicom_file)
@@ -95,7 +101,9 @@ def process_dicom_entry(dicom_file, contour_file):
             warnings.warn("Error in image '{}': {}".format(dicom_file, ex))
         return None
 
-def process_study(dicom_images_folder, contour_files_folder, contour_file_mask_format="IM-0001-{:04}-icontour-manual.txt"):
+def process_study(dicom_images_folder, contour_files_folder,
+                  contour_file_mask_format="IM-0001-{:04}-icontour-manual.txt",
+                  num_images=10):
     """
     In a study, receive a folder that contains the DICOM images and other folder that contains contour files.
     Optionally, we can specify the file name format of the contour files. In this case we have set by default the
@@ -104,7 +112,8 @@ def process_study(dicom_images_folder, contour_files_folder, contour_file_mask_f
     :param contour_files_folder: path to the folder that contains the contour files
     :param contour_file_mask_format: file name format for the contour files. By default, we will use the original
     data format, ex: IM-0001-0048-icontour-manual.txt
-    :return: iterator that return tuples with (numpy_image, contour_mask)
+    :param num_images: number of images that are going to be returned
+    :return: iterator that return a list of tuples with (numpy_image, contour_mask)
     """
     # Check all the files that must be read
     files = glob.glob(os.path.join(dicom_images_folder, "*.dcm"))
@@ -116,9 +125,17 @@ def process_study(dicom_images_folder, contour_files_folder, contour_file_mask_f
         contour_file = os.path.join(contour_files_folder, contour_file_mask_format.format(image_ix))
         params.append((dicom_file, contour_file))
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=5) as executor:
-        futs = [executor.submit(process_dicom_entry, dicom_file, contour_file) for (dicom_file, contour_file) in params]
-        for future in concurrent.futures.as_completed(futs):
-            result = future.result()
-            if result is not None:
-                yield result[0], result[1]
+    ix = 0
+    while ix < len(files):
+        results = [None] * num_images
+        j = 0
+        # Load num_images asynchronously
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futs = [executor.submit(process_dicom_entry, dicom_file, contour_file)
+                    for (dicom_file, contour_file) in params[ix:ix+num_images]]
+            for future in concurrent.futures.as_completed(futs):
+                result = future.result()
+                results[j] = result
+                j += 1
+            ix += num_images
+            yield results
