@@ -2,4 +2,6 @@
 .*
 !/.gitignore
 
-final_data
+final_data/contourfiles
+final_data/dicoms
+final_data/link.csv

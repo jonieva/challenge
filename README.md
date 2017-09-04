@@ -6,7 +6,7 @@
 * full_pipeline_v3. Part 2. Full pipeline in a more complex structure, with an object that handles a single DICOM study and a DataManager that coordinates the operations in a asynchronous way
 * tests.py. Unit tests
 
-All the tests assume that there is a final_data folder with the same structure as the images that were provided for the challenge
+All the tests assume that there is a folder named **final_data** with the same structure as the images that were provided for the challenge
 
 ### Python packages used.
 The code has been implemented using Python 3.6.2 based on a Miniconda distribution.
